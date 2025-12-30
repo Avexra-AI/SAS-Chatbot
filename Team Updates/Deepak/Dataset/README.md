@@ -23,7 +23,9 @@ Each row in this table represents **one product sold in one invoice**, with invo
 | Rate | Unit selling price of the product. |
 | Value | Line-item total value (`Quantity × Rate`). |
 | brand | Derived brand name of the product (rule-based extraction). |
-| category | Derived product category based on product description. |
+| sub_category | Derived product category based on product description. |
+| category | Derived product category based on sub category. |
+| client_type | based on GST number. |
 
 ---
 
@@ -72,13 +74,16 @@ Brand was derived using rule-based keyword matching:
 - IRANGE → Irange  
 - BEETEL → Beetel  
 
-### 8. Category Derivation
-Category was derived using product description keywords:
-- VDP → Video Door Phone  
-- CAM / DOME / BULLET → Camera  
-- NVR / DVR → Recorder  
-- CABLE / HDMI → Cable / Accessories  
-- POE / SWITCH → Networking  
+### 8. Sub_category Derivation
+<img width="402" height="544" alt="image" src="https://github.com/user-attachments/assets/8bd4abae-12b9-43a5-929a-eb06259141d5" />
+
+
+### 9. Category Derivation  
+<img width="587" height="198" alt="image" src="https://github.com/user-attachments/assets/5e23f456-1e00-45ee-a163-eeb0ecf66c2a" />
+
+### 10. Client_type Derivation  
+if GST number exists -> Dealer
+else -> End Client
 
 ---
 
