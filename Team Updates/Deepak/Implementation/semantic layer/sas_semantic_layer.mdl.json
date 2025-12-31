@@ -1,8 +1,26 @@
 {
-  "$schema": "https://github.com/Avexra-AI/SAS-Chatbot/new/main/Team%20Updates/Deepak/Implementation/sas_semantic_layer.mdl.json",
+  "$schema": "https://raw.githubusercontent.com/Canner/WrenAI/main/wren-mdl/mdl.schema.json",
+
   "catalog": "sas_analytics",
   "schema": "public",
   "dataSource": "POSTGRES",
+
+  "properties": {
+    "semanticLayerVersion": "v1.0",
+    "intendedPhase": "Phase-1 (Text-to-SQL + Analytics)",
+    "businessDomain": "Sales & Distribution Intelligence",
+    "governancePrinciples": [
+      "Human-defined business metrics",
+      "Explicit relationships only",
+      "No AI-inferred joins or formulas"
+    ],
+    "futureExtensions": [
+      "Vector-based synonym resolution",
+      "Role-based access control",
+      "Knowledge graph relationships",
+      "Metric-level caching"
+    ]
+  },
 
   "models": [
     {
@@ -12,9 +30,9 @@
       },
       "primaryKey": "line_id",
       "columns": [
-        { "name": "line_id", "type": "INTEGER" },
+        { "name": "line_id", "type": "INTEGER", "notNull": true },
         { "name": "date", "type": "DATE" },
-        { "name": "voucher_no", "type": "STRING" },
+        { "name": "voucher_no", "type": "STRING", "notNull": true },
         { "name": "firm", "type": "STRING" },
         { "name": "gstin", "type": "STRING" },
 
@@ -31,9 +49,15 @@
           "name": "client_type",
           "type": "STRING",
           "isCalculated": true,
-          "expression": "CASE WHEN gstin IS NOT NULL THEN 'Dealer' ELSE 'End Client' END"
+          "expression": "CASE WHEN gstin IS NOT NULL THEN 'Dealer' ELSE 'End Client' END",
+          "properties": {
+            "businessRule": "GST present implies Dealer, otherwise End Client"
+          }
         }
-      ]
+      ],
+      "properties": {
+        "grain": "Product-level transaction (line item)"
+      }
     },
 
     {
@@ -43,7 +67,7 @@
       },
       "primaryKey": "voucher_no",
       "columns": [
-        { "name": "voucher_no", "type": "STRING" },
+        { "name": "voucher_no", "type": "STRING", "notNull": true },
         { "name": "date", "type": "DATE" },
         { "name": "firm", "type": "STRING" },
         { "name": "gstin", "type": "STRING" },
@@ -52,7 +76,10 @@
         { "name": "net_value", "type": "NUMBER" },
         { "name": "total_tax", "type": "NUMBER" },
         { "name": "gross_total", "type": "NUMBER" }
-      ]
+      ],
+      "properties": {
+        "grain": "Invoice-level transaction"
+      }
     }
   ],
 
@@ -61,7 +88,10 @@
       "name": "transaction_to_line_items",
       "models": ["sales_transactions", "sales_line_items"],
       "joinType": "ONE_TO_MANY",
-      "condition": "sales_transactions.voucher_no = sales_line_items.voucher_no"
+      "condition": "sales_transactions.voucher_no = sales_line_items.voucher_no",
+      "properties": {
+        "joinPolicy": "Only voucher_no joins allowed to preserve invoice integrity"
+      }
     }
   ],
 
@@ -74,13 +104,16 @@
         { "name": "brand", "type": "STRING" },
         { "name": "category", "type": "STRING" },
         { "name": "client_type", "type": "STRING" }
-        ],
+      ],
       "measure": [
         {
           "name": "net_sales",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "SUM(value)"
+          "expression": "SUM(value)",
+          "properties": {
+            "businessMeaning": "Net sales before tax"
+          }
         }
       ],
       "timeGrain": [
@@ -104,7 +137,10 @@
           "name": "units_sold",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "SUM(quantity)"
+          "expression": "SUM(quantity)",
+          "properties": {
+            "businessMeaning": "Demand measured by quantity sold"
+          }
         }
       ]
     },
@@ -121,7 +157,10 @@
           "name": "purchase_count",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "COUNT(DISTINCT voucher_no)"
+          "expression": "COUNT(DISTINCT voucher_no)",
+          "properties": {
+            "businessMeaning": "Number of distinct purchases per client"
+          }
         }
       ]
     },
@@ -137,7 +176,10 @@
           "name": "revenue",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "SUM(gross_total)"
+          "expression": "SUM(gross_total)",
+          "properties": {
+            "businessMeaning": "Final billed revenue including tax"
+          }
         }
       ],
       "timeGrain": [
