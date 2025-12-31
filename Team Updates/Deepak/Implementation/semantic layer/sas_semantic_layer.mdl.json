@@ -1,0 +1,152 @@
+{
+  "$schema": "https://github.com/Avexra-AI/SAS-Chatbot/new/main/Team%20Updates/Deepak/Implementation/sas_semantic_layer.mdl.json",
+  "catalog": "sas_analytics",
+  "schema": "public",
+  "dataSource": "POSTGRES",
+
+  "models": [
+    {
+      "name": "sales_line_items",
+      "tableReference": {
+        "table": "sales_line_items"
+      },
+      "primaryKey": "line_id",
+      "columns": [
+        { "name": "line_id", "type": "INTEGER" },
+        { "name": "date", "type": "DATE" },
+        { "name": "voucher_no", "type": "STRING" },
+        { "name": "firm", "type": "STRING" },
+        { "name": "gstin", "type": "STRING" },
+
+        { "name": "product_name", "type": "STRING" },
+        { "name": "brand", "type": "STRING" },
+        { "name": "category", "type": "STRING" },
+        { "name": "sub_category", "type": "STRING" },
+
+        { "name": "quantity", "type": "NUMBER" },
+        { "name": "rate", "type": "NUMBER" },
+        { "name": "value", "type": "NUMBER" },
+
+        {
+          "name": "client_type",
+          "type": "STRING",
+          "isCalculated": true,
+          "expression": "CASE WHEN gstin IS NOT NULL THEN 'Dealer' ELSE 'End Client' END"
+        }
+      ]
+    },
+
+    {
+      "name": "sales_transactions",
+      "tableReference": {
+        "table": "sales_transactions"
+      },
+      "primaryKey": "voucher_no",
+      "columns": [
+        { "name": "voucher_no", "type": "STRING" },
+        { "name": "date", "type": "DATE" },
+        { "name": "firm", "type": "STRING" },
+        { "name": "gstin", "type": "STRING" },
+
+        { "name": "total_quantity", "type": "NUMBER" },
+        { "name": "net_value", "type": "NUMBER" },
+        { "name": "total_tax", "type": "NUMBER" },
+        { "name": "gross_total", "type": "NUMBER" }
+      ]
+    }
+  ],
+
+  "relationships": [
+    {
+      "name": "transaction_to_line_items",
+      "models": ["sales_transactions", "sales_line_items"],
+      "joinType": "ONE_TO_MANY",
+      "condition": "sales_transactions.voucher_no = sales_line_items.voucher_no"
+    }
+  ],
+
+  "metrics": [
+    {
+      "name": "total_sales_value",
+      "baseObject": "sales_line_items",
+      "dimension": [
+        { "name": "product_name", "type": "STRING" },
+        { "name": "brand", "type": "STRING" },
+        { "name": "category", "type": "STRING" },
+        { "name": "client_type", "type": "STRING" }
+        ],
+      "measure": [
+        {
+          "name": "net_sales",
+          "type": "NUMBER",
+          "isCalculated": true,
+          "expression": "SUM(value)"
+        }
+      ],
+      "timeGrain": [
+        {
+          "name": "sales_date",
+          "refColumn": "date",
+          "dateParts": ["YEAR", "QUARTER", "MONTH"]
+        }
+      ]
+    },
+
+    {
+      "name": "product_demand",
+      "baseObject": "sales_line_items",
+      "dimension": [
+        { "name": "product_name", "type": "STRING" },
+        { "name": "brand", "type": "STRING" }
+      ],
+      "measure": [
+        {
+          "name": "units_sold",
+          "type": "NUMBER",
+          "isCalculated": true,
+          "expression": "SUM(quantity)"
+        }
+      ]
+    },
+
+    {
+      "name": "client_purchase_frequency",
+      "baseObject": "sales_transactions",
+      "dimension": [
+        { "name": "firm", "type": "STRING" },
+        { "name": "gstin", "type": "STRING" }
+      ],
+      "measure": [
+        {
+          "name": "purchase_count",
+          "type": "NUMBER",
+          "isCalculated": true,
+          "expression": "COUNT(DISTINCT voucher_no)"
+        }
+      ]
+    },
+
+    {
+      "name": "gross_revenue",
+      "baseObject": "sales_transactions",
+      "dimension": [
+        { "name": "firm", "type": "STRING" }
+      ],
+      "measure": [
+        {
+          "name": "revenue",
+          "type": "NUMBER",
+          "isCalculated": true,
+          "expression": "SUM(gross_total)"
+        }
+      ],
+      "timeGrain": [
+        {
+          "name": "invoice_date",
+          "refColumn": "date",
+          "dateParts": ["YEAR", "MONTH"]
+        }
+      ]
+    }
+  ]
+}
