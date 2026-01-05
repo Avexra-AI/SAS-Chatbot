@@ -7,38 +7,36 @@
 ```text
 backend/
 ├── app/
-│   ├── main.py
-│   ├── config.py
-│   ├── dependencies.py
+│   ├── main.py                 # FastAPI entrypoint
+│   ├── config.py               # Env & settings
+│   ├── dependencies.py         # DB, auth, cache deps
 │   │
-│   ├── api/
+│   ├── api/                    # HTTP layer (thin)
 │   │   ├── router.py
-│   │   ├── chat.py
-│   │   ├── dashboard.py
+│   │   ├── chat.py             # Chatbot endpoint
+│   │   ├── dashboard.py        # Dashboard data APIs
 │   │   └── health.py
 │   │
-│   ├── core/
-│   │   ├── orchestrator.py
-│   │   ├── intent.py
-│   │   ├── semantic.py
-│   │   ├── nl2sql.py
-│   │   ├── rag.py
-│   │   ├── cache.py
-│   │   └── fallback.py
+│   ├── core/                   # SYSTEM BRAIN
+│   │   ├── orchestrator.py     # End-to-end flow controller
+│   │   ├── intent.py           # LLM intent extraction
+│   │   ├── semantic.py         # Metric/dimension validation
+│   │   ├── nl2sql.py           # Deterministic SQL builder
+│   │   ├── visualization.py    # Chart selector logic
+│   │   ├── cache.py            # Semantic & response cache
+│   │   └── fallback.py         # Low-confidence / failure handling
 │   │
 │   ├── db/
-│   │   ├── session.py
-│   │   ├── models.py
-│   │   ├── queries.py
-│   │   └── migrations/
+│   │   ├── session.py          # Neon DB connection
+│   │   ├── models.py           # ORM models (sales, products, etc.)
+│   │   └── queries.py          # Approved SQL templates only
 │   │
 │   ├── services/
-│   │   ├── llm.py
-│   │   └── embeddings.py
+│   │   └── llm.py              # LLM abstraction (OpenAI/Groq/etc.)
 │   │
 │   ├── schemas/
-│   │   ├── chat.py
-│   │   └── dashboard.py
+│   │   ├── chat.py             # Chat request/response schemas
+│   │   └── dashboard.py        # Visualization schemas
 │   │
 │   └── utils/
 │       ├── logging.py
@@ -46,11 +44,10 @@ backend/
 │       └── validators.py
 │
 ├── tests/
-│
 ├── Dockerfile
 ├── docker-compose.yml
-├── requirements.txt
-└── README.md
+└── requirements.txt
+
 
 ```
 ---
