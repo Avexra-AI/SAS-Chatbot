@@ -1,6 +1,6 @@
 # Backend Architecture (Chatbot and Dashboard Only)
 
----
+<img width="257" height="375" alt="image" src="https://github.com/user-attachments/assets/10a08915-e560-446c-a914-b89c30d19514" />
 
 ## Project Structure
 
@@ -50,4 +50,4 @@ backend/
 
 
 ```
----
+
