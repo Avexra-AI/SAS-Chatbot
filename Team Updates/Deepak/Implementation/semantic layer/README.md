@@ -1,187 +1,171 @@
-# Semantic Layer (MDL) – SAS Sales Intelligence System
+# 📊 Sales Analytics – Final Data & Semantic Layer Design
 
-## Overview
-
-This repository contains the **Semantic Layer (MDL – Model Definition Layer)** used in the SAS Sales Intelligence project.
-The semantic layer acts as a **governed interface between raw sales data and AI-driven analytics**, ensuring that all insights, visualizations, and chatbot responses are **business-aligned, consistent, and reliable**.
-
-The semantic layer prevents AI systems from guessing joins, metrics, or business logic by explicitly defining them in a machine-readable contract.
+This document explains the **final database tables**, their **relationship**, and the **semantic layer** used for analytics, NL→SQL, and dashboards.
 
 ---
 
-## Why a Semantic Layer?
+## 1. Final Database Tables (Analytical Layer)
 
-Traditional AI or Text-to-SQL systems often fail because:
-
-* Business logic is implicit
-* Metrics are redefined inconsistently
-* Joins are inferred incorrectly
-* Results change across dashboards and queries
-
-This semantic layer solves those problems by enforcing:
-
-* **Human-defined business rules**
-* **Explicit data relationships**
-* **Single source of truth for metrics**
+After ingesting and preserving raw data, the system exposes **two final analytical tables**.
+These tables are **stable, query-ready**, and are the **only tables used by the semantic layer**.
 
 ---
 
-## Design Principles
+### 🔹 Table 1: `sales_line_items`
 
-The semantic layer strictly follows these principles:
+**Purpose:**
+Stores **product-level (line-item) sales data**.
+Each row represents **one product sold in an invoice**.
 
-1. **Business Alignment**
+**Schema:**
 
-   * All metrics represent real business concepts (sales, demand, revenue, client behavior)
-   * No technical or ambiguous definitions are exposed to AI
+```sql
+sales_line_items (
+    line_id        BIGSERIAL PRIMARY KEY,
+    date           DATE,
+    voucher_no     TEXT NOT NULL,
+    firm           TEXT,
+    gstin          TEXT,
+    product_name   TEXT,
+    brand          TEXT,
+    category       TEXT,
+    sub_category   TEXT,
+    quantity       INTEGER,
+    rate           NUMERIC(12,2),
+    value          NUMERIC(14,2),
+    client_type    TEXT
+)
+```
 
-2. **Data Consistency & Governance**
+**Grain:**
+➡️ One row = **one product in one invoice**
 
-   * Metrics are defined once and reused everywhere
-   * Joins are explicitly declared
-   * Business rules are deterministic, not inferred
+**Key points:**
 
-3. **Technical Architecture & Performance**
-
-   * Aggregations are executed at the database level
-   * Clear separation of data grain (line-level vs invoice-level)
-   * Optimizer-friendly SQL generation
-
-4. **Iterative Development & Adoption**
-
-   * Versioned semantic contract
-   * Phase-based rollout
-   * Designed to support future extensions (RBAC, vector search, knowledge graphs)
-
----
-
-## Data Models (Schema)
-
-### 1. `sales_line_items`
-
-**Grain:** Product-level transaction (line item)
-
-Represents individual products sold in each invoice.
-
-Key fields:
-
-* Product details: `product_name`, `brand`, `category`, `sub_category`
-* Transaction details: `date`, `voucher_no`, `firm`
-* Quantitative fields: `quantity`, `rate`, `value`
-* Derived business field:
-
-  * `client_type`
-
-    * Rule: GST present → `Dealer`, otherwise `End Client`
-
-This table powers **product demand, movement analysis, and category-level insights**.
+* `line_id` is a system-generated primary key
+* `voucher_no` links this table to invoice-level data
+* No aggregations are performed here
+* `client_type` is a physical column (not calculated in semantic layer)
 
 ---
 
-### 2. `sales_transactions`
+### 🔹 Table 2: `sales_transactions`
 
-**Grain:** Invoice-level transaction
+**Purpose:**
+Stores **invoice-level (transaction-level) data**.
+Each row represents **one complete invoice**.
 
-Represents aggregated sales at the invoice level.
+**Schema:**
 
-Key fields:
+```sql
+sales_transactions (
+    voucher_no     TEXT PRIMARY KEY,
+    date           DATE,
+    firm           TEXT,
+    gstin          TEXT,
+    total_quantity INTEGER,
+    net_value      NUMERIC(14,2),
+    total_tax      NUMERIC(14,2),
+    gross_total    NUMERIC(14,2)
+)
+```
 
-* Invoice identifiers: `voucher_no`, `date`
-* Client information: `firm`, `gstin`
-* Financial values: `net_value`, `total_tax`, `gross_total`
+**Grain:**
+➡️ One row = **one invoice**
 
-This table powers **revenue analysis and client purchase behavior**.
+**Key points:**
 
----
-
-## Relationships (Joins)
-
-Only **one explicit relationship** is allowed:
-
-* `sales_transactions.voucher_no = sales_line_items.voucher_no`
-* Join type: `ONE_TO_MANY`
-
-No joins on client name, date, or product name are permitted.
-This preserves invoice integrity and prevents incorrect aggregations.
-
----
-
-## Metrics (Business Logic)
-
-All metrics are **human-defined** and cannot be altered or inferred by AI.
-
-### Core Metrics
-
-* **Total Sales Value**
-  `SUM(value)`
-  Net sales before tax
-
-* **Product Demand**
-  `SUM(quantity)`
-  Measures product movement by volume
-
-* **Client Purchase Frequency**
-  `COUNT(DISTINCT voucher_no)`
-  Tracks repeat vs one-time buyers
-
-* **Gross Revenue**
-  `SUM(gross_total)`
-  Final billed revenue including tax
-
-### Time Analysis
-
-Metrics support controlled time grains:
-
-* Year
-* Quarter
-* Month
-
-This enables trend analysis without exposing raw date logic to AI.
+* `voucher_no` uniquely identifies an invoice
+* Aggregations (quantity, value, tax) are precomputed
+* Designed for fast analytics and reporting
 
 ---
 
-## Governance & Versioning
+## 2. Relationship Between Tables
 
-The semantic layer includes explicit governance metadata:
+```text
+sales_transactions (1) ──── voucher_no ──── (many) sales_line_items
+```
 
-* Versioned (`v1.0`)
-* Phase-defined (Phase-1: Text-to-SQL + Analytics)
-* Clear business domain declaration
-* Future extension roadmap documented
+**Relationship type:**
 
-This ensures safe evolution without breaking dashboards or AI behavior.
+* **ONE_TO_MANY**
 
----
+**Join condition:**
 
-## How This Is Used
+```sql
+sales_transactions.voucher_no = sales_line_items.voucher_no
+```
 
-This semantic layer is consumed by:
+**Design rule:**
 
-* AI chatbots (Text-to-SQL)
-* Analytics dashboards
-* Visualization pinning workflows
-* Future intelligent agents
-
-It acts as the **single source of truth** for all analytical outputs.
+* Only `voucher_no` is allowed for joins
+* Prevents incorrect or AI-inferred joins
+* Preserves invoice integrity
 
 ---
 
-## Key Guarantee
+## 3. Semantic Layer Overview
 
-With this semantic layer in place:
+The semantic layer provides a **business-friendly abstraction** over the final tables.
+It is used by:
 
-* AI cannot hallucinate joins
-* AI cannot redefine metrics
-* Dashboards and chatbot answers always stay consistent
-* Business users receive trustworthy insights
+* NL → SQL systems
+* Chatbots
+* Dashboards
+* Analytics APIs
+
+### 🔹 Models Defined
+
+#### `sales_line_items`
+
+* Maps directly to `sales_line_items` table
+* Primary key: `line_id`
+* Used for:
+
+  * Product demand
+  * Category analysis
+  * Client-type based sales
+
+#### `sales_transactions`
+
+* Maps directly to `sales_transactions` table
+* Primary key: `voucher_no`
+* Used for:
+
+  * Revenue analysis
+  * Client purchase frequency
+  * Invoice-level trends
 
 ---
 
-## Future Extensions (Planned)
+### 🔹 Metrics Defined
 
-* Vector-based synonym handling
-* Role-based access control
-* Knowledge graph relationships
-* Metric-level caching
+| Metric Name                 | Base Table         | Meaning                        |
+| --------------------------- | ------------------ | ------------------------------ |
+| `total_sales_value`         | sales_line_items   | Net sales value                |
+| `product_demand`            | sales_line_items   | Units sold per product         |
+| `client_purchase_frequency` | sales_transactions | Number of purchases per client |
+| `gross_revenue`             | sales_transactions | Total billed revenue           |
+
+All metrics:
+
+* Are **human-defined**
+* Use **explicit SQL expressions**
+* Do **not infer joins automatically**
 
 ---
+
+## 4. Architectural Principles Followed
+
+* Raw data is preserved separately (audit-safe)
+* Semantic layer never queries raw tables directly
+* Final tables are deterministic and refreshable
+* No AI-inferred joins or calculations
+* Designed for production-scale analytics
+
+---
+
+
+This design is **implementation-ready** and should not be structurally modified further.
+Future changes should be limited to **new metrics or new dimensions**, not schema redesign.
