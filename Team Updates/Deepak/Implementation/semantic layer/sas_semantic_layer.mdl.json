@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/Canner/WrenAI/main/wren-mdl/mdl.schema.json",
+  "$schema": "https://github.com/Avexra-AI/SAS-Chatbot/edit/main/Team%20Updates/Deepak/Implementation/semantic%20layer/sas_semantic_layer.mdl.json",
 
   "catalog": "sas_analytics",
   "schema": "public",
@@ -13,12 +13,6 @@
       "Human-defined business metrics",
       "Explicit relationships only",
       "No AI-inferred joins or formulas"
-    ],
-    "futureExtensions": [
-      "Vector-based synonym resolution",
-      "Role-based access control",
-      "Knowledge graph relationships",
-      "Metric-level caching"
     ]
   },
 
@@ -45,15 +39,7 @@
         { "name": "rate", "type": "NUMBER" },
         { "name": "value", "type": "NUMBER" },
 
-        {
-          "name": "client_type",
-          "type": "STRING",
-          "isCalculated": true,
-          "expression": "CASE WHEN gstin IS NOT NULL THEN 'Dealer' ELSE 'End Client' END",
-          "properties": {
-            "businessRule": "GST present implies Dealer, otherwise End Client"
-          }
-        }
+        { "name": "client_type", "type": "STRING" }
       ],
       "properties": {
         "grain": "Product-level transaction (line item)"
@@ -90,7 +76,7 @@
       "joinType": "ONE_TO_MANY",
       "condition": "sales_transactions.voucher_no = sales_line_items.voucher_no",
       "properties": {
-        "joinPolicy": "Only voucher_no joins allowed to preserve invoice integrity"
+        "joinPolicy": "Only voucher_no joins allowed"
       }
     }
   ],
@@ -110,17 +96,7 @@
           "name": "net_sales",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "SUM(value)",
-          "properties": {
-            "businessMeaning": "Net sales before tax"
-          }
-        }
-      ],
-      "timeGrain": [
-        {
-          "name": "sales_date",
-          "refColumn": "date",
-          "dateParts": ["YEAR", "QUARTER", "MONTH"]
+          "expression": "SUM(value)"
         }
       ]
     },
@@ -137,10 +113,7 @@
           "name": "units_sold",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "SUM(quantity)",
-          "properties": {
-            "businessMeaning": "Demand measured by quantity sold"
-          }
+          "expression": "SUM(quantity)"
         }
       ]
     },
@@ -157,10 +130,7 @@
           "name": "purchase_count",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "COUNT(DISTINCT voucher_no)",
-          "properties": {
-            "businessMeaning": "Number of distinct purchases per client"
-          }
+          "expression": "COUNT(DISTINCT voucher_no)"
         }
       ]
     },
@@ -176,17 +146,7 @@
           "name": "revenue",
           "type": "NUMBER",
           "isCalculated": true,
-          "expression": "SUM(gross_total)",
-          "properties": {
-            "businessMeaning": "Final billed revenue including tax"
-          }
-        }
-      ],
-      "timeGrain": [
-        {
-          "name": "invoice_date",
-          "refColumn": "date",
-          "dateParts": ["YEAR", "MONTH"]
+          "expression": "SUM(gross_total)"
         }
       ]
     }
