@@ -1,0 +1,42 @@
+{
+  "question": "category and sub-category wise gross profit ",
+  "generated_sql": "\n        SELECT\n            t1.brand,\n            COALESCE(SUM(t2.total_tax_amount), 0) AS tax_collection,\n            COALESCE(SUM(t2.gross_total), 0) AS gross_profit\n        FROM table_first t1\n        JOIN table_second t2\n          ON t1.firm = t2.firm\n         AND t1.voucher_no = t2.voucher_no\n        GROUP BY t1.brand;\n        ",
+  "answer": "Showing sample data as the request could not be fully interpreted.",
+  "result": [
+    {
+      "brand": "Beetel",
+      "tax_collection": 11048.72,
+      "gross_profit": 72430
+    },
+    {
+      "brand": "CP Plus",
+      "tax_collection": 1181561.3,
+      "gross_profit": 8279774
+    },
+    {
+      "brand": "Daichi",
+      "tax_collection": 375743.74,
+      "gross_profit": 3253633
+    },
+    {
+      "brand": "Hikvision",
+      "tax_collection": 1476841.16,
+      "gross_profit": 46531057.14
+    },
+    {
+      "brand": "Irange",
+      "tax_collection": 69410.3,
+      "gross_profit": 502055
+    },
+    {
+      "brand": "Other",
+      "tax_collection": 2962186.82,
+      "gross_profit": 29468094.14
+    },
+    {
+      "brand": "Prama",
+      "tax_collection": 407748.6,
+      "gross_profit": 6549670
+    }
+  ]
+}
