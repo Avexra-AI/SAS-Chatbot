@@ -1,51 +1,168 @@
 Tally Live Sync Agent
+Technical Documentation & Execution Flow
+1. Purpose of This Module (Context First)
 
-#Purpose
+This module is a local data ingestion and preprocessing component inside a larger AgentX AI system.
+Its responsibility is ONLY ONE THING:
+Convert live, continuously changing Tally accounting data into a clean, normalized, always-updated local dataset that downstream systems (dashboards / AI agents) can safely consume.
 
-This module implements a local Tally live synchronization
-agent used as a data ingestion layer within the larger AgentX AI system.
+It does not:
 
-Its sole responsibility is to continuously extract, preprocess, and
- maintain an up-to-date accounting dataset from a 
- company’s Tally Prime instance so that downstream components
-  (dashboards, analytics, and agentic AI) always operate on fresh data.
-
-  #Role in the Overall System
-
-This module is NOT a complete application.
-
-It acts as the first stage in the AgentX AI pipeline:
-Tally Prime (Live Company Data)
-        ↓
-Tally Live Sync Agent (this module)
-        ↓
-Clean, Normalized Local Dataset
-        ↓
-AgentX AI Dashboard & Reasoning Layer
+predict
+visualize
+expose APIs
+modify Tally data
+This strict separation is intentional and correct
 
 
-#Scope & Responsibilities
-What this module DOES
+┌────────────────────┐
+│  Tally Prime ERP   │
+│ (Live Company Data)│
+└─────────┬──────────┘
+          │  HTTP XML (Read-only)
+          ▼
+┌────────────────────┐
+│ Tally Source Layer │
+│ (XML Fetch)        │
+└─────────┬──────────┘
+          ▼
+┌────────────────────┐
+│ XML Sanitizer      │
+│ (Fix malformed XML)│
+└─────────┬──────────┘
+          ▼
+┌────────────────────┐
+│ Normalizer         │
+│ (Voucher → Ledger) │
+└─────────┬──────────┘
+          ▼
+┌────────────────────┐
+│ Local Store        │
+│ (SQLite Live DB)   │
+└─────────┬──────────┘
+          ▼
+┌────────────────────┐
+│ AgentX AI /        │
+│ Dashboard Layer    │
+└────────────────────┘
 
-1.Connects to Tally Prime via its official HTTP/XML interface
-2.Pulls incremental accounting data at fixed intervals
-3.Sanitizes malformed ERP XML
-4.Normalizes vouchers into ledger-level records
-5.Maintains a continuously updated local dataset
-6.Handles edits and duplicates safely
+step :2 code
+2.1
+agent.py — The Orchestrator (Main Loop)
+
+Role:
+Acts as the brain of the sync process.
+Key responsibilities:
+Load last sync state
+Trigger incremental fetch
+Coordinate sanitization, normalization, and storage
+Ensure idempotency (no duplicate corruption)
+Run continuously
+
+2.2tally_source.py — Tally Connector
+
+Role:
+Handles only communication with Tally Prime.
+What it does:
+Sends an XML request to Tally’s HTTP server
+Requests Day Book data for a specific date range
+Receives raw ERP XML response
+What it deliberately avoids:
+No parsing
+No business logic
+No state tracking
+Why this separation matters:
+If Tally’s interface changes, only this file needs modification.
 
 
-#Near-Real-Time Data Behavior
-This module achieves near-real-time synchronization by:
-polling Tally periodically (e.g., every 60 seconds)
-fetching only new or modified vouchers
-updating the dataset incrementally
+2.3xml_sanitizer.py — ERP XML Cleanup Layer
 
-tally_live_agent/
-│
-├── agent.py             # main sync loop
-├── tally_source.py      # Tally HTTP connector
-├── xml_sanitizer.py     # legacy XML cleanup
-├── normalizer.py        # voucher → ledger normalization
-├── store.py             # local persistent store
-├── state.py             # incremental sync tracking
+Problem it solves:
+Tally often emits invalid XML characters (control chars, broken entities) that crash standard XML parsers.
+
+What it does:
+Removes illegal ASCII control characters
+Strips malformed character references
+Produces parser-safe XML text
+
+Why this is critical:
+Without this step:
+The entire pipeline would fail on a single bad voucher
+AI systems downstream would never see consistent data
+This layer is non-negotiable in real ERP environments.
+
+
+
+
+2.3normalizer.py — Accounting-Aware Transformation
+
+Role:
+Transforms ERP-specific structures into analytics-friendly records.
+
+Key transformations:
+Voucher → multiple ledger entries
+Amount sign → DR / CR semantics
+Voucher fingerprint generation
+fingerprint = hash(
+    voucher_no +
+    voucher_date +
+    voucher_type +
+    ledger_entries
+)
+
+2.4store.py — Local Live Dataset
+
+Role:
+Maintains the single source of truth for downstream systems.
+
+Design choices:
+SQLite (local, simple, reliable)
+Voucher table (metadata)
+Ledger entry table (facts)
+Why local storage is correct here:
+No cloud dependency
+
+Works on company machines
+Dashboards / AI can query without touching Tally
+
+2.5state.py — Incremental Sync Memory
+
+Role:
+Tracks what has already been processed.
+
+Stores:
+Last sync date
+Fingerprints of processed vouchers
+Why this exists:
+Without state:
+Every cycle would reprocess everything
+Data duplication would explode
+Performance would degrade rapidly
+
+step:3...
+Runtime Behavior (Step-by-Step)
+One Full Sync Cycle
+
+Agent starts:
+Loads previous sync state
+Requests incremental Day Book data from Tally
+Sanitizes malformed XML
+Parses vouchers
+Generates fingerprints
+Filters already-processed vouchers
+Inserts new data into local DB
+Updates sync state
+Sleeps and repeats
+  
+step4:Why This Works With “Live” Company Data
+
+Important clarification:
+Tally does NOT provide push-based real-time streams
+Industry-standard approach is polling-based near-real-time sync
+
+This agent:
+polls frequently
+pulls only deltas
+keeps the dataset continuously fresh
+
+step 5:
