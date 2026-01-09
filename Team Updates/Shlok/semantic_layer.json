@@ -1,0 +1,176 @@
+{
+  "domain": "Sales & Inventory Analytics",
+
+  "governance": {
+    "semanticLayerVersion": "v1.1",
+    "ownership": "Analytics Team",
+    "designPrinciples": [
+      "Business-defined metrics only",
+      "Explicit joins only",
+      "No AI-inferred relationships",
+      "One grain per model",
+      "No write operations allowed"
+    ],
+    "sqlRestrictions": {
+      "allowed": ["SELECT"],
+      "disallowed": ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE"]
+    },
+    "joinPolicy": {
+      "allowOnlyDefinedRelationships": true,
+      "preventFanoutJoins": true
+    },
+    "timeGovernance": {
+      "comparisonsMustSpecifyPeriod": true,
+      "defaultComparisonWindowDays": 30
+    }
+  },
+
+  "models": {
+    "customers": {
+      "table": "customers",
+      "primary_key": "id",
+      "grain": "customer",
+      "columns": ["id", "name", "created_at"]
+    },
+
+    "sales": {
+      "table": "sales",
+      "primary_key": "voucher_no",
+      "grain": "invoice",
+      "columns": [
+        "voucher_no",
+        "voucher_date",
+        "customer_id",
+        "customer_name",
+        "total_amount"
+      ]
+    },
+
+    "sales_items": {
+      "table": "sales_items",
+      "grain": "line_item",
+      "columns": [
+        "voucher_no",
+        "item_name",
+        "quantity",
+        "rate",
+        "amount"
+      ]
+    },
+
+    "stock_items": {
+      "table": "stock_items",
+      "primary_key": "item_name",
+      "grain": "item",
+      "columns": ["item_name", "opening_qty"]
+    },
+
+    "stock_movements": {
+      "table": "stock_movements",
+      "grain": "movement",
+      "columns": [
+        "item_name",
+        "movement_type",
+        "quantity",
+        "movement_date"
+      ]
+    }
+  },
+
+  "relationships": [
+    {
+      "from": "customers",
+      "to": "sales",
+      "type": "ONE_TO_MANY",
+      "on": "customer_id",
+      "governance": "Approved customer → invoice relationship"
+    },
+    {
+      "from": "sales",
+      "to": "sales_items",
+      "type": "ONE_TO_MANY",
+      "on": "voucher_no",
+      "governance": "Invoice to line-items only via voucher_no"
+    },
+    {
+      "from": "sales_items",
+      "to": "stock_items",
+      "type": "MANY_TO_ONE",
+      "on": "item_name",
+      "governance": "Product reference join"
+    },
+    {
+      "from": "stock_items",
+      "to": "stock_movements",
+      "type": "ONE_TO_MANY",
+      "on": "item_name",
+      "governance": "Inventory movement tracking"
+    }
+  ],
+
+  "metrics": {
+    "total_sales_amount": {
+      "base_model": "sales",
+      "description": "Total invoiced sales value",
+      "expression": "SUM(total_amount)"
+    },
+
+    "units_sold": {
+      "base_model": "sales_items",
+      "description": "Total quantity of items sold",
+      "expression": "SUM(quantity)"
+    },
+
+    "item_revenue": {
+      "base_model": "sales_items",
+      "description": "Revenue generated per item",
+      "expression": "SUM(amount)"
+    },
+
+    "current_stock": {
+      "base_model": "stock_movements",
+      "description": "Current stock considering purchases and sales",
+      "expression": "SUM(CASE WHEN movement_type = 'PURCHASE' THEN quantity WHEN movement_type = 'SALE' THEN -quantity ELSE 0 END)"
+    },
+
+    "product_sales_growth": {
+      "base_model": "sales_items",
+      "description": "Product revenue change compared to previous period",
+      "expression": "SUM(CASE WHEN voucher_date >= CURRENT_DATE - INTERVAL '30 days' THEN amount ELSE 0 END) - SUM(CASE WHEN voucher_date < CURRENT_DATE - INTERVAL '30 days' AND voucher_date >= CURRENT_DATE - INTERVAL '60 days' THEN amount ELSE 0 END)"
+    }
+  },
+
+  "dimensions": {
+    "customer": {
+      "model": "customers",
+      "column": "name",
+      "description": "Customer name dimension"
+    },
+    "item": {
+      "model": "stock_items",
+      "column": "item_name",
+      "description": "Product / item dimension"
+    },
+    "voucher_date": {
+      "model": "sales",
+      "column": "voucher_date",
+      "description": "Invoice date dimension"
+    }
+  },
+
+  "queryScope": {
+    "allowedQuestionTypes": [
+      "Sales analysis",
+      "Product performance",
+      "Customer analytics",
+      "Inventory status",
+      "Trend increase/decrease"
+    ],
+    "disallowedQuestionTypes": [
+      "Predictions",
+      "Root cause analysis",
+      "Operational actions",
+      "Write or modify data"
+    ]
+  }
+}
