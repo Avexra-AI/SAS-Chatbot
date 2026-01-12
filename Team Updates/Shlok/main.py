@@ -1,227 +1,161 @@
-# =========================
-# IMPORTS
-# =========================
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import psycopg2
-import pandas as pd
-import requests
+import os
 import json
-import re
+import requests
+
+from app.core.cache import get_from_cache, store_in_cache
+from dotenv import load_dotenv
 import os
 
-# =========================
-# FASTAPI APP
-# =========================
-app = FastAPI(title="NL2SQL Bot (Generic & Robust)")
+load_dotenv()
 
-# =========================
-# DATABASE CONFIG
-# =========================
-NEON_DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "ep-raspy-night-ah8kwb6a-pooler.c-3.us-east-1.aws.neon.tech"),
-    "database": os.getenv("DB_NAME", "neondb"),
-    "user": os.getenv("DB_USER", "neondb_owner"),
-    "password": os.getenv("DB_PASSWORD", "npg_tGk50unxySTW"),
-    "port": 5432,
-    "sslmode": "require"
-}
+# ======================
+# APP
+# ======================
+app = FastAPI(title="SAS Chatbot – NL2SQL")
 
-# =========================
-# OLLAMA CONFIG
-# =========================
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL_NAME = "mistral"
+# ======================
+# LOAD SEMANTIC LAYER
+# ======================
+with open("semantic.js") as f:
+    SEMANTIC = json.load(f)
 
-# =========================
-# METRIC OWNERSHIP (CORE IDEA)
-# =========================
-TABLE_FIRST_METRICS = {
-    "sales", "value", "quantity", "rate",
-    "brand", "category", "product", "client", "firm"
-}
+# ======================
+# ENV
+# ======================
+DATABASE_URL = os.getenv("DATABASE_URL")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "llama3-70b-8192"
 
-TABLE_SECOND_METRICS = {
-    "tax", "gst", "gross", "gross total",
-    "total tax", "tax amount", "invoice", "net"
-}
+# ======================
+# DB
+# ======================
+def run_sql(sql):
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute(sql)
+    rows = cur.fetchall()
+    cols = [c[0] for c in cur.description]
+    conn.close()
+    return [dict(zip(cols, r)) for r in rows]
 
-# =========================
-# SYSTEM PROMPT
-# =========================
-SCHEMA_PROMPT = """
-You are an expert PostgreSQL SQL generator.
-
-Schema:
-table_first(
-    f_date DATE,
-    firm VARCHAR,
-    voucher_no VARCHAR,
-    quantity INT,
-    value NUMERIC,
-    brand VARCHAR,
-    category VARCHAR
-)
-
-table_second(
-    date_text TIMESTAMP,
-    firm VARCHAR,
-    voucher_no VARCHAR,
-    total_tax_amount NUMERIC,
-    gross_total NUMERIC
-)
-
-Rules:
-- Generate ONLY PostgreSQL SELECT queries
-- Never generate placeholder dates like YYYY-MM-DD
-- Always use COALESCE for aggregations
-- Return ONLY valid JSON
-
-Output format:
-{
-  "sql": "...",
-  "answer": "..."
-}
-"""
-
-# =========================
+# ======================
 # REQUEST MODEL
-# =========================
-class QueryRequest(BaseModel):
+# ======================
+class Query(BaseModel):
     question: str
 
-# =========================
-# SQL SAFETY
-# =========================
-def validate_sql(sql: str):
-    forbidden = ["delete", "update", "insert", "drop", "alter", "truncate"]
-    if any(word in sql.lower() for word in forbidden):
-        raise ValueError("Unsafe SQL detected")
+# ======================
+# GROQ → INTENT
+# ======================
+def extract_intent(question: str) -> dict:
+    prompt = """
+Return ONLY JSON:
+{
+  "metric": "",
+  "dimensions": [],
+  "filters": {}
+}
 
-# =========================
-# METRIC EXTRACTION (GENERIC)
-# =========================
-def detect_metric_sources(question: str):
-    q = question.lower()
-    uses_first = any(word in q for word in TABLE_FIRST_METRICS)
-    uses_second = any(word in q for word in TABLE_SECOND_METRICS)
-    return uses_first, uses_second
+Allowed metrics: total_sales_amount, item_revenue, current_stock
+Allowed dimensions: customer, item
+"""
 
-# =========================
-# ENFORCE JOIN LOGIC (GENERIC)
-# =========================
-def enforce_join_logic(sql: str, question: str) -> str:
-    uses_first, uses_second = detect_metric_sources(question)
-
-    # JOIN only if metrics belong to different tables
-    if uses_first and uses_second:
-        return """
-        SELECT
-            t1.brand,
-            COALESCE(SUM(t2.total_tax_amount), 0) AS tax_collection,
-            COALESCE(SUM(t2.gross_total), 0) AS gross_profit
-        FROM table_first t1
-        JOIN table_second t2
-          ON t1.firm = t2.firm
-         AND t1.voucher_no = t2.voucher_no
-        GROUP BY t1.brand;
-        """
-
-    return sql
-
-# =========================
-# SAFE FALLBACK
-# =========================
-def safe_fallback():
-    return (
-        "SELECT * FROM table_first LIMIT 5;",
-        "Showing sample data as the request could not be fully interpreted."
-    )
-
-# =========================
-# PARSE LLM RESPONSE
-# =========================
-def parse_llm_response(text: str):
-    try:
-        text = re.sub(r"```json|```", "", text).strip()
-        data = json.loads(text)
-
-        sql = data.get("sql", "").strip()
-        answer = data.get("answer", "").strip()
-
-        if not sql.lower().startswith("select"):
-            raise ValueError("Only SELECT allowed")
-
-        if not sql.endswith(";"):
-            sql += ";"
-
-        validate_sql(sql)
-        return sql, answer
-
-    except Exception:
-        return safe_fallback()
-
-# =========================
-# LLM → SQL
-# =========================
-def nl_to_sql_llama(question: str):
     payload = {
-        "model": MODEL_NAME,
+        "model": MODEL,
         "messages": [
-            {"role": "system", "content": SCHEMA_PROMPT},
+            {"role": "system", "content": prompt},
             {"role": "user", "content": question}
         ],
-        "stream": True,
-        "options": {"temperature": 0}
+        "temperature": 0
     }
 
-    response = requests.post(
-        OLLAMA_URL,
-        json=payload,
-        stream=True,
-        timeout=300
-    )
-    response.raise_for_status()
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    full_text = ""
-    for line in response.iter_lines():
-        if line:
-            data = json.loads(line.decode())
-            if "message" in data:
-                full_text += data["message"]["content"]
-            if data.get("done"):
-                break
+    res = requests.post(GROQ_URL, headers=headers, json=payload)
+    res.raise_for_status()
 
-    return parse_llm_response(full_text)
+    return json.loads(res.json()["choices"][0]["message"]["content"])
 
-# =========================
-# EXECUTE SQL
-# =========================
-def execute_sql(sql_query: str):
-    conn = psycopg2.connect(**NEON_DB_CONFIG)
-    try:
-        df = pd.read_sql(sql_query, conn)
-        return df.to_dict(orient="records")
-    finally:
-        conn.close()
+# ======================
+# SEMANTIC VALIDATION
+# ======================
+def validate_semantic(intent):
+    if intent["metric"] not in SEMANTIC["metrics"]:
+        raise ValueError("Metric not allowed")
 
-# =========================
-# ROUTES
-# =========================
+    for d in intent["dimensions"]:
+        if d not in SEMANTIC["dimensions"]:
+            raise ValueError(f"Dimension '{d}' not allowed")
+
+# ======================
+# SQL BUILDER
+# ======================
+def build_sql(intent):
+    metric = intent["metric"]
+    dims = intent["dimensions"]
+    expr = SEMANTIC["metrics"][metric]["expression"]
+
+    if metric == "total_sales_amount" and "customer" in dims:
+        return f"""
+        SELECT c.name AS customer, {expr} AS total_sales
+        FROM customers c
+        JOIN sales s ON c.id = s.customer_id
+        GROUP BY c.name
+        """
+
+    if metric == "item_revenue":
+        return f"""
+        SELECT item_name, {expr} AS revenue
+        FROM sales_items
+        GROUP BY item_name
+        """
+
+    if metric == "current_stock":
+        return f"""
+        SELECT item_name, {expr} AS current_stock
+        FROM stock_movements
+        GROUP BY item_name
+        """
+
+    raise ValueError("Unsupported query")
+
+# ======================
+# API
+# ======================
 @app.post("/chat")
-def chat(req: QueryRequest):
+def chat(req: Query):
     try:
-        sql, answer = nl_to_sql_llama(req.question)
+        # 1. Groq
+        intent = extract_intent(req.question)
 
-        # 🔥 Generic enforcement
-        sql = enforce_join_logic(sql, req.question)
+        # 2. Semantic governance
+        validate_semantic(intent)
 
-        result = execute_sql(sql)
+        # 3. Semantic cache
+        cached = get_from_cache(intent)
+        if cached:
+            return cached
+
+        # 4. SQL
+        sql = build_sql(intent)
+
+        # 5. DB
+        result = run_sql(sql)
+
+        # 6. Cache store
+        store_in_cache(intent, sql.strip(), result)
 
         return {
-            "question": req.question,
-            "generated_sql": sql,
-            "answer": answer,
+            "source": "database",
+            "intent": intent,
+            "sql": sql.strip(),
             "result": result
         }
 
