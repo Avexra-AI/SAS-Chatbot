@@ -1,14 +1,18 @@
+from datetime import date, datetime
 from decimal import Decimal
 
-def normalize_value(value):
-    if isinstance(value, Decimal):
-        return float(value)
-    return value
-
-
-def normalize_row(row: dict) -> dict:
-    return {k: normalize_value(v) for k, v in row.items()}
-
-
 def normalize_data(rows: list[dict]) -> list[dict]:
-    return [normalize_row(row) for row in rows]
+    normalized = []
+
+    for row in rows:
+        clean_row = {}
+        for k, v in row.items():
+            if isinstance(v, Decimal):
+                clean_row[k] = float(v)
+            elif isinstance(v, (date, datetime)):
+                clean_row[k] = v.isoformat()
+            else:
+                clean_row[k] = v
+        normalized.append(clean_row)
+
+    return normalized
