@@ -1,21 +1,35 @@
 export function isChartRenderable(visualization, data) {
-  if (!visualization || !data || data.length === 0) return false;
+  if (!visualization) return false;
+  if (!data || !Array.isArray(data) || data.length === 0) return false;
 
-  const { type, x, y } = visualization;
-
-  if (!type || type === "table" || type === "empty") return false;
-  if (!x || !y) return false;
-
-  for (const row of data) {
-    if (
-      row[x] === null ||
-      row[x] === undefined ||
-      row[y] === null ||
-      row[y] === undefined
-    ) {
-      return false;
-    }
+  // KPI
+  if (visualization.type === "kpi") {
+    return true;
   }
 
-  return true;
+  // Bar / Line / Area
+  if (["bar", "line", "area"].includes(visualization.type)) {
+    const { x, y } = visualization;
+    if (!x || !y) return false;
+
+    return data.every(
+      (row) =>
+        row[x] !== null &&
+        row[x] !== undefined &&
+        row[y] !== null &&
+        row[y] !== undefined
+    );
+  }
+
+  // Histogram
+  if (visualization.type === "histogram") {
+    return !!visualization.value;
+  }
+
+  // Table
+  if (visualization.type === "table") {
+    return true;
+  }
+
+  return false;
 }
