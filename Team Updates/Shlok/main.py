@@ -4,64 +4,98 @@ import psycopg2
 import os
 import json
 import requests
-
-from app.core.cache import get_from_cache, store_in_cache
+import re
 from dotenv import load_dotenv
-import os
 
+from app.core.semantic import SemanticLayer
+from app.core.chat_memory import save_message, get_last_messages
+
+# ======================
+# ENV
+# ======================
 load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+if not DATABASE_URL or not GROQ_API_KEY:
+    raise RuntimeError("Missing environment variables")
+
+# ======================
+# PATH
+# ======================
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SEMANTIC_PATH = os.path.join(BASE_DIR, "semantic.json")
 
 # ======================
 # APP
 # ======================
 app = FastAPI(title="SAS Chatbot – NL2SQL")
+semantic = SemanticLayer(SEMANTIC_PATH)
 
 # ======================
-# LOAD SEMANTIC LAYER
+# GROQ
 # ======================
-with open("semantic.js") as f:
-    SEMANTIC = json.load(f)
-
-# ======================
-# ENV
-# ======================
-DATABASE_URL = os.getenv("DATABASE_URL")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama3-70b-8192"
+MODEL = "llama-3.1-8b-instant"
 
 # ======================
 # DB
 # ======================
-def run_sql(sql):
+def run_sql(sql: str):
     conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor()
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cols = [c[0] for c in cur.description]
-    conn.close()
-    return [dict(zip(cols, r)) for r in rows]
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            cols = [c[0] for c in cur.description]
+            return [dict(zip(cols, r)) for r in rows]
+    finally:
+        conn.close()
 
 # ======================
 # REQUEST MODEL
 # ======================
 class Query(BaseModel):
+    session_id: str
     question: str
 
 # ======================
-# GROQ → INTENT
+# INTENT EXTRACTION (WITH MEMORY)
 # ======================
-def extract_intent(question: str) -> dict:
-    prompt = """
-Return ONLY JSON:
-{
+import re
+import json
+
+def extract_intent(question: str, history: list) -> dict:
+    context = "\n".join(
+        f"Q: {h['question']} | Intent: {h['intent']}"
+        for h in history
+    )
+
+    prompt = f"""
+You are an intent extraction engine.
+
+Conversation history:
+{context}
+
+Return ONLY valid JSON in this EXACT format:
+
+{{
   "metric": "",
   "dimensions": [],
-  "filters": {}
-}
+  "filters": {{}}
+}}
 
-Allowed metrics: total_sales_amount, item_revenue, current_stock
-Allowed dimensions: customer, item
+Allowed metrics:
+- total_sales_amount
+- units_sold
+- item_revenue
+- current_stock
+
+Allowed dimensions:
+- customer
+- item
+- voucher_date
 """
 
     payload = {
@@ -79,52 +113,69 @@ Allowed dimensions: customer, item
     }
 
     res = requests.post(GROQ_URL, headers=headers, json=payload)
-    res.raise_for_status()
+    if res.status_code != 200:
+        raise RuntimeError(res.text)
 
-    return json.loads(res.json()["choices"][0]["message"]["content"])
+    raw = res.json()["choices"][0]["message"]["content"].strip()
 
-# ======================
-# SEMANTIC VALIDATION
-# ======================
-def validate_semantic(intent):
-    if intent["metric"] not in SEMANTIC["metrics"]:
-        raise ValueError("Metric not allowed")
+    # 1️⃣ Extract JSON block (non-greedy)
+    match = re.search(r"\{[\s\S]*", raw)
+    if not match:
+        raise ValueError("LLM did not return JSON")
 
-    for d in intent["dimensions"]:
-        if d not in SEMANTIC["dimensions"]:
-            raise ValueError(f"Dimension '{d}' not allowed")
+    json_text = match.group().strip()
+
+    # 2️⃣ AUTO-REPAIR missing closing brace
+    if json_text.count("{") > json_text.count("}"):
+        json_text += "}"
+
+    # 3️⃣ Parse JSON
+    try:
+        intent = json.loads(json_text)
+    except json.JSONDecodeError:
+        raise ValueError(f"Unrecoverable JSON from LLM:\n{json_text}")
+
+    # 4️⃣ Structural validation
+    if not all(k in intent for k in ("metric", "dimensions", "filters")):
+        raise ValueError("Invalid intent structure")
+
+    return intent
 
 # ======================
 # SQL BUILDER
 # ======================
-def build_sql(intent):
-    metric = intent["metric"]
-    dims = intent["dimensions"]
-    expr = SEMANTIC["metrics"][metric]["expression"]
+def build_sql(intent: dict) -> str:
+    metric = semantic.get_metric(intent["metric"])
+    base_model = semantic.get_model(metric["base_model"])
 
-    if metric == "total_sales_amount" and "customer" in dims:
-        return f"""
-        SELECT c.name AS customer, {expr} AS total_sales
-        FROM customers c
-        JOIN sales s ON c.id = s.customer_id
-        GROUP BY c.name
-        """
+    if not intent["dimensions"]:
+        return f"SELECT {metric['expression']} AS {intent['metric']} FROM {base_model['table']}"
 
-    if metric == "item_revenue":
-        return f"""
-        SELECT item_name, {expr} AS revenue
-        FROM sales_items
-        GROUP BY item_name
-        """
+    select = [f"{metric['expression']} AS {intent['metric']}"]
+    group_by = []
+    joins = []
 
-    if metric == "current_stock":
-        return f"""
-        SELECT item_name, {expr} AS current_stock
-        FROM stock_movements
-        GROUP BY item_name
-        """
+    for d in intent["dimensions"]:
+        dim = semantic.get_dimension(d)
+        dim_model = semantic.get_model(dim["model"])
 
-    raise ValueError("Unsupported query")
+        select.append(f"{dim_model['table']}.{dim['column']} AS {d}")
+        group_by.append(f"{dim_model['table']}.{dim['column']}")
+
+        rel = semantic.get_relationship(dim["model"], metric["base_model"])
+        parent = semantic.get_model(rel["from"])
+        child = semantic.get_model(rel["to"])
+
+        joins.append(
+            f"JOIN {child['table']} ON {child['table']}.{rel['on']} = {parent['table']}.{parent['primary_key']}"
+        )
+
+    return (
+        f"SELECT {', '.join(select)} "
+        f"FROM {base_model['table']} "
+        f"{' '.join(joins)} "
+        f"GROUP BY {', '.join(group_by)}"
+    )
 
 # ======================
 # API
@@ -132,30 +183,18 @@ def build_sql(intent):
 @app.post("/chat")
 def chat(req: Query):
     try:
-        # 1. Groq
-        intent = extract_intent(req.question)
+        history = get_last_messages(req.session_id)
+        intent = extract_intent(req.question, history)
+        semantic.validate(intent)
 
-        # 2. Semantic governance
-        validate_semantic(intent)
-
-        # 3. Semantic cache
-        cached = get_from_cache(intent)
-        if cached:
-            return cached
-
-        # 4. SQL
         sql = build_sql(intent)
-
-        # 5. DB
         result = run_sql(sql)
 
-        # 6. Cache store
-        store_in_cache(intent, sql.strip(), result)
+        save_message(req.session_id, req.question, intent)
 
         return {
-            "source": "database",
             "intent": intent,
-            "sql": sql.strip(),
+            "sql": sql,
             "result": result
         }
 
