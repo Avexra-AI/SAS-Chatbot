@@ -1,0 +1,36 @@
+Tally Connector (Mock-based Ingestion)
+Overview
+This project is a Python-based Tally Connector designed to connect to Tally via its HTTP/XML
+interface
+and ingest accounting data into a Neon PostgreSQL database in raw, unmodified form.
+Since a live Tally instance was not available locally, a Mock Tally Server was implemented and
+used
+to simulate Tally’s HTTP/XML behavior for development and validation purposes.
+Why Mock Tally Was Used
+• Tally was not available on the local machine
+• The connector requires a running HTTP/XML endpoint on port 9000
+• A mock server allowed end-to-end testing of the ingestion pipeline
+• This approach validates connector correctness without altering production logic
+Objectives
+• Simulate Tally HTTP/XML responses using a mock server
+• Send XML requests programmatically (no manual exports)
+• Receive XML responses without altering accounting meaning
+• Wrap responses into a raw JSON envelope with metadata
+• Store raw payloads in PostgreSQL using JSONB
+Tech Stack
+Python, Requests, XMLToDict, Psycopg2, Neon PostgreSQL, Mock HTTP Server
+Ingestion Design
+• Raw XML responses are preserved in meaning
+• No transformations, aggregations, or accounting logic applied
+• JSONB storage enables replay, audit, and future schema mapping
+Mock Tally Architecture
+The mock server listens on localhost:9000 and returns predefined Tally-like XML responses
+for ledger and voucher requests. The connector interacts with this mock exactly as it would
+with a real Tally instance, ensuring zero code changes when switching to live Tally.
+Design Principles
+• One raw source of truth
+• Ingestion-only responsibility
+• Future-ready for analytics, reporting, and AI/NL-to-SQL
+Status
+The connector has been successfully tested using the mock Tally server and Neon PostgreSQL,
+demonstrating a complete and reliable ingestion pipeline.
