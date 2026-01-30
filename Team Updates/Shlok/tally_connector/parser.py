@@ -1,6 +1,15 @@
-import xmltodict
-import json
+import xml.etree.ElementTree as ET
 
-def xml_to_json(xml_response: str) -> dict:
-    parsed = xmltodict.parse(xml_response)
-    return json.loads(json.dumps(parsed))  # ensure pure JSON
+
+def parse_tally_vouchers(xml_string: str):
+    root = ET.fromstring(xml_string)
+    vouchers = []
+
+    for v in root.findall(".//VOUCHER"):
+        vouchers.append({
+            "voucher_no": v.findtext("VOUCHERNUMBER"),
+            "voucher_date": v.findtext("DATE"),
+            "amount": v.findtext("AMOUNT"),
+        })
+
+    return vouchers
